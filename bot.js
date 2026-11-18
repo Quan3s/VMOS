@@ -719,11 +719,30 @@ export async function runBot(config, socket, onDone) {
                 capturedAuth: () => sessionAuth,
             });
             if (reloginAuth?.token) sessionAuth = reloginAuth;
-            // Producer sẽ spawn tiến trình mới sau khi account này lưu xong.
+
+            // Lưu account ngay sau khi đổi mật khẩu + đăng nhập lại chính thống thành công.
+            // Producer sẽ spawn tiến trình mới sau khi bot kết thúc vòng này.
+            const result = {
+                email: mail.address,
+                password: newPassword,
+                token: inboxToken,
+                tokenExpiresAt: inboxExpiresAt,
+                mailPassword: mail.password,
+                provider: mail.provider,
+                timestamp: new Date().toISOString(),
+            };
+            log('');
+            log('════════════════════════════════════════════');
+            log('✅ HOÀN TẤT (đã đổi pass + relogin chính thống)');
+            log(`📧 Provider: ${result.provider}`);
+            log(`📋 Format: ${result.email}|${result.password}|${result.token}`);
+            log('════════════════════════════════════════════');
+            socket.emit('result', result);
             socket.emit('relogin-success', {
                 email: mail.address,
                 token: reloginAuth?.token || null,
             });
+            return;
         } else {
             log('⚠️ Không thấy login dialog sau đổi password');
         }
