@@ -55,10 +55,12 @@ export async function runProducer({
   await db.connect();
 
   const socket = new EventEmitter();
-  socket.on('log', (line) => console.log(line));
-  socket.on('step', ({ n, name }) => console.log(`[step ${n}/10] ${name}`));
+  // bot.js đã console.log(line) trước khi emit — không log lại ở đây.
   socket.on('error', (msg) => console.error(`[bot] lỗi: ${msg}`));
-  if (emit) socket.on('log', (line) => emit('log', line));
+  if (emit) {
+    socket.on('log', (line) => emit('log', line));
+    socket.on('step', (step) => emit('step', step));
+  }
 
   let savePromise = Promise.resolve();
   let reloginSucceeded = false;

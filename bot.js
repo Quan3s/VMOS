@@ -482,26 +482,57 @@ export async function runBot(config, socket, onDone) {
         // BƯỚC 7: Điền OTP
         // ============================================================
         setStep(7, 'Điền OTP đăng ký');
-        await page.waitForSelector('input[type="number"][maxlength="1"]', { timeout: 15000 });
 
-        // Form đăng ký mới yêu cầu Customer ID (dùng làm ID đăng nhập).
-        // Dùng local-part của email làm ID: 6-32 ký tự, chỉ chữ/số.
+        // Form đăng ký mới yêu cầu Customer ID TRƯỚC khi hiện OTP.
         const customerId = mail.address.split('@')[0];
         const customerInput = await page.$('#registration-customer-id');
         if (customerInput) {
             await customerInput.click({ clickCount: 3 });
             await customerInput.type(customerId, { delay: 40 });
-            await sleep(400);
+            await sleep(500);
             log(`✓ Customer ID: ${customerId}`);
         } else {
             log('⚠️ Không thấy #registration-customer-id');
         }
 
-        log('⌨️  Điền OTP...');
-        const otpInputs = await page.$$('input[type="number"][maxlength="1"]');
-        for (let i = 0; i < 6; i++) {
-            await otpInputs[i].type(signupOTP[i], { delay: 80 });
-            await sleep(180);
+        const otpSelectors = [
+            'input[type="number"][maxlength="1"]',
+            'input[inputmode="numeric"][maxlength="1"]',
+            'input[maxlength="1"]',
+        ];
+        let otpInputs = [];
+        for (const sel of otpSelectors) {
+            const found = await page.$$(sel);
+            if (found.length >= 6) {
+                otpInputs = found.slice(0, 6);
+                log(`✓ OTP: ${found.length} ô (${sel})`);
+                break;
+            }
+        }
+        if (!otpInputs.length) {
+            const single = await page.$('input[maxlength="6"], input[placeholder*="code" i], input[placeholder*="mã" i]');
+            if (single) {
+                log('⌨️ Điền OTP vào ô single-input');
+                await single.click({ clickCount: 3 });
+                await single.type(signupOTP, { delay: 80 });
+            } else {
+                const state = await page.evaluate(() => ({
+                    url: location.href,
+                    text: document.body.innerText.slice(-1200),
+                    inputs: [...document.querySelectorAll('input')]
+                        .filter(e => e.offsetParent !== null)
+                        .map(e => ({ type: e.type, maxLength: e.maxLength, placeholder: e.placeholder, id: e.id })),
+                }));
+                log('🧾 Trạng thái khi không thấy ô OTP: ' + JSON.stringify(state));
+                await page.screenshot({ path: `debug-step7-${Date.now()}.png`, fullPage: true });
+                throw new Error('Không tìm thấy ô nhập OTP (đã chụp debug-step7)');
+            }
+        } else {
+            log('⌨️  Điền OTP...');
+            for (let i = 0; i < 6; i++) {
+                await otpInputs[i].type(signupOTP[i], { delay: 80 });
+                await sleep(180);
+            }
         }
         // Auto-submit khi đủ 6 số; chờ component kịp gửi request
         await sleep(1200);
