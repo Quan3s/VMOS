@@ -1,0 +1,7 @@
+node_modules/
+.env
+.browsers/
+data/
+debug-*.png
+error-*.png
+*.log
