@@ -717,6 +717,7 @@ export async function runBot(config, socket, onDone) {
                     imageBuffers.shadowAt = 0;
                 },
                 capturedAuth: () => sessionAuth,
+                excludeOtps: [resetOTP],
             });
             if (reloginAuth?.token) sessionAuth = reloginAuth;
 
