@@ -14,7 +14,7 @@ Env bắt buộc:
 
 Env tuỳ chọn:
 - `VMOS_DB_TABLE` (mặc định `vmos`)
-- `VMOS_MAX_ACCOUNTS` (mặc định `300`)
+- `VMOS_MAX_ACCOUNTS` (mặc định `500`)
 - `VMOS_TTL_SECONDS` (mặc định `1036800` = 12 ngày)
 - `PORT` (Render tự inject)
 
@@ -33,7 +33,7 @@ DATABASE_URL=postgres://... npm run producer
 
 - **Bắt buộc headed**: `HEADLESS=false` (mặc định). Script sẽ thoát nếu bạn set `HEADLESS=true` mà không đặt `VMOS_ALLOW_HEADLESS=1`, vì headless dính Cloudflare.
 - Cần Xvfb nếu máy không có display; `lib/env-check.js` tự start Xvfb.
-- Lưu kết quả `runBot()` vào bảng `vmos`, dừng khi đạt 300 account.
+- Lưu kết quả `runBot()` vào bảng `vmos`, dừng khi đạt 500 account.
 - Sau khi bot báo `relogin-success` (đăng nhập lại chính thống: captcha → OTP → login), producer spawn một tiến trình mới rồi tự exit.
 
 ## Re-login thủ công
