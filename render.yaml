@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: vmos-pool-api
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm run api
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: API_KEY
+        sync: false
+      - key: VMOS_DB_TABLE
+        value: vmos
+      - key: VMOS_MAX_ACCOUNTS
+        value: "500"
+      - key: VMOS_TTL_SECONDS
+        value: "1036800"

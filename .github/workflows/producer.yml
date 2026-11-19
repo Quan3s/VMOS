@@ -1,0 +1,59 @@
+name: VMOS producer
+
+# Chay producer dinh ky de fill pool bang `vmos` toi VMOS_MAX_ACCOUNTS (500).
+# Khong dung GitHub Secrets: DATABASE_URL duoc doc tu repository VARIABLE `DATABASE_URL`.
+# Dat bien o: repo Settings -> Secrets and variables -> Variables -> Actions -> New variable.
+
+on:
+  schedule:
+    - cron: '0 * * * *'          # moi gio, phut 00
+  workflow_dispatch:             # cho phep bam tay luc can
+
+concurrency:
+  group: vmos-producer
+  cancel-in-progress: false     # khong huy run dang chay giua chung
+
+jobs:
+  produce:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50          # nho hon gio chay cron de khong chong cheo
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Cai dat Chrome + Xvfb
+        uses: browser-actions/setup-chrome@v1
+        id: chrome
+
+      - name: Cai dat system deps
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends xvfb x11-utils \
+            libnss3 libatk-bridge2.0-0 libgtk-3-0 libgbm1 libasound2
+          echo "BROWSER_PATH=${{ steps.chrome.outputs.chrome-path }}" >> "$GITHUB_ENV"
+
+      - name: Cai dat npm deps
+        run: npm install --no-audit --no-fund
+
+      - name: Chay producer
+        env:
+          DATABASE_URL: ${{ vars.DATABASE_URL }}
+          VMOS_DB_TABLE: vmos
+          VMOS_MAX_ACCOUNTS: '500'
+          VMOS_TTL_SECONDS: '1036800'
+          HEADLESS: 'false'
+          TZ: Asia/Ho_Chi_Minh
+        run: npm run producer
+
+      - name: So luong account trong pool
+        if: always()
+        env:
+          DATABASE_URL: ${{ vars.DATABASE_URL }}
+        run: |
+          node -e "const {Client}=require('pg');(async()=>{const c=new Client({connectionString:process.env.DATABASE_URL});await c.connect();const r=await c.query('SELECT COUNT(*)::int AS n FROM vmos');console.log('vmos rows:',r.rows[0].n);await c.end();})().catch(e=>{console.error(e.message);process.exit(1)})"

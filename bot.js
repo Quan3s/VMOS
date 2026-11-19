@@ -1,9 +1,9 @@
 import puppeteer from 'puppeteer-core';
 import fs from 'node:fs';
-import { createHash } from 'node:crypto';
 import { createMail } from './lib/mailtm.js';
 import { createInboxToken } from './lib/inbox-store.js';
 import { solveAliyunPuzzle } from './lib/aliyun-captcha.js';
+import { loginWithOtpOfficial } from './lib/official-login.js';
 import { prepareProxy, stopProxy } from './lib/proxy.js';
 import { ensureDisplay, ensureWarpService } from './lib/env-check.js';
 
@@ -45,7 +45,7 @@ function findBrowser(config) {
 // ============================================================
 // LAUNCH BROWSER
 // ============================================================
-async function launchBrowser(config, proxyInfo, log) {
+export async function launchBrowser(config, proxyInfo, log) {
     if (process.platform === 'linux' && !config.headless) {
         const hasDisplay = await ensureDisplay(log);
         if (!hasDisplay) throw new Error('Không có DISPLAY. Chạy: apt install -y xvfb');
@@ -86,228 +86,6 @@ async function launchBrowser(config, proxyInfo, log) {
     });
     log('✓ Chromium đã mở');
     return browser;
-}
-
-// ============================================================
-// ĐĂNG NHẬP LẠI BẰNG PASSWORD (sau khi đổi password → site logout)
-// ============================================================
-async function loginWithPassword(page, account, password, log) {
-    log('🔐 Đăng nhập lại bằng mật khẩu...');
-
-    // Ưu tiên login qua API: sau khi đổi password, UI có thể còn state logout
-    // và trả "operation failed" dù API login hoàn toàn OK.
-    try {
-        const passwordHash = createHash('md5').update(password).digest('hex');
-        const apiLogin = await page.evaluate(async ({ account, passwordHash }) => {
-            const r = await fetch('https://api.vmoscloud.com/vcpcloud/api/user/login', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    mobilePhone: account,
-                    loginType: 1,
-                    password: passwordHash,
-                    channel: 'web'
-                })
-            });
-            let json = null;
-            try { json = await r.json(); } catch {}
-            return { status: r.status, json };
-        }, { account, passwordHash });
-
-        const data = apiLogin?.json?.data;
-        if (apiLogin?.json?.code === 200 && data?.token && data?.userId) {
-            await page.evaluate((d) => {
-                localStorage.setItem('token', d.token);
-                localStorage.setItem('userId', String(d.userId));
-                let users = [];
-                try { users = JSON.parse(localStorage.getItem('users') || '[]'); } catch {}
-                if (!Array.isArray(users)) users = [];
-                if (!users.some(u => String(u.userId) === String(d.userId))) {
-                    users.push({
-                        userId: d.userId,
-                        customerId: d.customerId,
-                        nickName: d.nickName,
-                        token: d.token,
-                        mobilePhone: d.mobilePhone
-                    });
-                }
-                localStorage.setItem('users', JSON.stringify(users));
-            }, data);
-            await page.setCookie(
-                { name: 'token', value: data.token, domain: '.vmoscloud.com', path: '/' },
-                { name: 'userId', value: String(data.userId), domain: '.vmoscloud.com', path: '/' }
-            );
-            await page.reload({ waitUntil: 'domcontentloaded', timeout: 60000 });
-            try {
-                await page.waitForFunction(() => {
-                    const d = document.querySelector('#login-dialog');
-                    return !d || d.offsetParent === null;
-                }, { timeout: 20000 });
-            } catch {}
-            const state = await page.evaluate(() => {
-                const d = document.querySelector('#login-dialog');
-                return {
-                    url: location.href,
-                    loginVisible: !!(d && d.offsetParent !== null),
-                    token: !!localStorage.getItem('token')
-                };
-            });
-            if (!state.loginVisible) {
-                log('✅ Đăng nhập lại bằng API OK');
-                return data;
-            }
-            log('⚠️ API login OK nhưng UI vẫn hiện login dialog: ' + JSON.stringify(state));
-        } else {
-            log('⚠️ API login thất bại: ' + JSON.stringify(apiLogin).slice(0, 300));
-        }
-    } catch (e) {
-        log('⚠️ API login lỗi: ' + e.message);
-    }
-
-    log('↩️ Fallback đăng nhập bằng UI...');
-
-    // Đưa app về trạng thái sạch trước khi login UI (tránh token cũ còn trong bộ nhớ)
-    try {
-        await page.goto('https://cloud.vmoscloud.com/', { waitUntil: 'domcontentloaded', timeout: 60000 });
-        await page.waitForFunction(() => {
-            const d = document.querySelector('#login-dialog');
-            return d && d.offsetParent !== null;
-        }, { timeout: 15000 });
-        await sleep(1000);
-    } catch (e) {
-        const cleanAuth = await page.evaluate(() => ({
-            token: localStorage.getItem('token') || '',
-            userId: localStorage.getItem('userId') || ''
-        })).catch(() => ({ token: '', userId: '' }));
-        if (cleanAuth.token) {
-            log('✓ Session đã hoạt động sau reload, bỏ qua UI login');
-            return { token: cleanAuth.token, userId: cleanAuth.userId };
-        }
-        log('⚠️ Không mở được trang login sạch: ' + e.message);
-    }
-
-    // VMOS trả checkEmail data:true cho tài khoản vừa tạo (dù đã có password)
-    // → UI nhảy sang form đăng ký. Chặn response này để ép hiện panel password.
-    const onRequest = (req) => {
-        try {
-            if (/\/user\/checkEmail/i.test(req.url())) {
-                const cors = {
-                    'access-control-allow-origin': 'https://cloud.vmoscloud.com',
-                    'access-control-allow-credentials': 'true',
-                    'access-control-allow-methods': 'GET,POST,OPTIONS',
-                    'access-control-allow-headers': req.headers()['access-control-request-headers'] || '*'
-                };
-                if (req.method() === 'OPTIONS') {
-                    req.respond({ status: 204, headers: cors });
-                } else {
-                    req.respond({
-                        status: 200,
-                        headers: { ...cors, 'content-type': 'application/json; charset=utf-8' },
-                        body: JSON.stringify({ code: 200, msg: 'success', data: false, '2fa': false })
-                    });
-                }
-            } else {
-                req.continue();
-            }
-        } catch {
-            try { req.continue(); } catch {}
-        }
-    };
-    // Đăng ký listener TRƯỚC khi bật interception để tránh request bị treo
-    page.on('request', onRequest);
-    await page.setRequestInterception(true);
-
-    try {
-        await page.waitForSelector('#login-dialog', { timeout: 15000 });
-        await page.waitForFunction(() => {
-            const d = document.querySelector('#login-dialog');
-            return d && d.offsetParent !== null;
-        }, { timeout: 15000 });
-        await sleep(1000);
-
-        // Panel email / user ID
-        const accountInput = await page.$(
-            '#login-dialog input[placeholder*="email" i], #login-dialog input[placeholder*="user" i]'
-        ) || await page.$('#login-dialog input.el-input__inner');
-        if (!accountInput) throw new Error('Không thấy ô email/user ID trong login dialog');
-        await accountInput.click({ clickCount: 3 });
-        await accountInput.type(account, { delay: 40 });
-        await sleep(600);
-
-        // TOS mặc định đã check; chỉ click nếu icon "checked" đang ẩn
-        const tosVisible = await page.evaluate(() => {
-            const imgs = [...document.querySelectorAll('#login-dialog .tos img')];
-            return imgs.map(i => i.style.display !== 'none');
-        });
-        if (tosVisible.length && tosVisible[tosVisible.length - 1] !== true) {
-            log('☑️ Check TOS...');
-            await page.evaluate(() => document.querySelector('#login-dialog .tos img')?.click());
-            await sleep(500);
-        }
-
-        const firstName = await page.evaluate(() => {
-            const dlg = document.querySelector('#login-dialog');
-            const btn = [...dlg.querySelectorAll('button')].find(b =>
-                b.offsetParent !== null &&
-                b.classList.contains('el-button--primary') &&
-                b.classList.contains('el-button--large'));
-            btn?.click();
-            return btn?.innerText?.trim() || null;
-        });
-        log(`✓ Click "${firstName || 'Login/Register'}"`);
-        await sleep(1800);
-
-        try {
-            await page.waitForSelector('#login-dialog input[type="password"]', { timeout: 15000 });
-        } catch {
-            const text = await page.evaluate(() =>
-                document.querySelector('#login-dialog')?.innerText?.slice(0, 800) || '');
-            throw new Error('Không hiện panel password: ' + text);
-        }
-
-        const pwdInput = await page.$('#login-dialog input[type="password"]');
-        await pwdInput.click({ clickCount: 3 });
-        await pwdInput.type(password, { delay: 50 });
-        await sleep(600);
-
-        const loginClicked = await page.evaluate(() => {
-            const dlg = document.querySelector('#login-dialog');
-            const btns = [...dlg.querySelectorAll('button')].filter(b => b.offsetParent !== null);
-            const btn = btns.find(b =>
-                b.classList.contains('el-button--primary') &&
-                b.classList.contains('el-button--large')) ||
-                btns.find(b => /^(login|sign in)$/i.test((b.innerText || '').trim()));
-            btn?.click();
-            return btn?.innerText?.trim() || null;
-        });
-        log(`✓ Click Login: ${loginClicked || '(none)'}`);
-
-        try {
-            await page.waitForFunction(() => {
-                const d = document.querySelector('#login-dialog');
-                return !d || d.offsetParent === null;
-            }, { timeout: 20000 });
-        } catch {}
-        await sleep(3000);
-
-        const state = await page.evaluate(() => {
-            const d = document.querySelector('#login-dialog');
-            return {
-                url: location.href,
-                loginVisible: !!(d && d.offsetParent !== null),
-                toast: [...document.querySelectorAll('.el-message, .el-notification')]
-                    .map(e => (e.innerText || '').trim()).filter(Boolean).join(' | ')
-            };
-        });
-        log('📍 Sau login: ' + JSON.stringify(state));
-        if (state.loginVisible) {
-            throw new Error('Đăng nhập lại thất bại' + (state.toast ? ': ' + state.toast : ''));
-        }
-        log('✅ Đăng nhập lại thành công');
-    } finally {
-        page.off('request', onRequest);
-        try { await page.setRequestInterception(false); } catch {}
-    }
 }
 
 // ============================================================
@@ -704,26 +482,57 @@ export async function runBot(config, socket, onDone) {
         // BƯỚC 7: Điền OTP
         // ============================================================
         setStep(7, 'Điền OTP đăng ký');
-        await page.waitForSelector('input[type="number"][maxlength="1"]', { timeout: 15000 });
 
-        // Form đăng ký mới yêu cầu Customer ID (dùng làm ID đăng nhập).
-        // Dùng local-part của email làm ID: 6-32 ký tự, chỉ chữ/số.
+        // Form đăng ký mới yêu cầu Customer ID TRƯỚC khi hiện OTP.
         const customerId = mail.address.split('@')[0];
         const customerInput = await page.$('#registration-customer-id');
         if (customerInput) {
             await customerInput.click({ clickCount: 3 });
             await customerInput.type(customerId, { delay: 40 });
-            await sleep(400);
+            await sleep(500);
             log(`✓ Customer ID: ${customerId}`);
         } else {
             log('⚠️ Không thấy #registration-customer-id');
         }
 
-        log('⌨️  Điền OTP...');
-        const otpInputs = await page.$$('input[type="number"][maxlength="1"]');
-        for (let i = 0; i < 6; i++) {
-            await otpInputs[i].type(signupOTP[i], { delay: 80 });
-            await sleep(180);
+        const otpSelectors = [
+            'input[type="number"][maxlength="1"]',
+            'input[inputmode="numeric"][maxlength="1"]',
+            'input[maxlength="1"]',
+        ];
+        let otpInputs = [];
+        for (const sel of otpSelectors) {
+            const found = await page.$$(sel);
+            if (found.length >= 6) {
+                otpInputs = found.slice(0, 6);
+                log(`✓ OTP: ${found.length} ô (${sel})`);
+                break;
+            }
+        }
+        if (!otpInputs.length) {
+            const single = await page.$('input[maxlength="6"], input[placeholder*="code" i], input[placeholder*="mã" i]');
+            if (single) {
+                log('⌨️ Điền OTP vào ô single-input');
+                await single.click({ clickCount: 3 });
+                await single.type(signupOTP, { delay: 80 });
+            } else {
+                const state = await page.evaluate(() => ({
+                    url: location.href,
+                    text: document.body.innerText.slice(-1200),
+                    inputs: [...document.querySelectorAll('input')]
+                        .filter(e => e.offsetParent !== null)
+                        .map(e => ({ type: e.type, maxLength: e.maxLength, placeholder: e.placeholder, id: e.id })),
+                }));
+                log('🧾 Trạng thái khi không thấy ô OTP: ' + JSON.stringify(state));
+                await page.screenshot({ path: `debug-step7-${Date.now()}.png`, fullPage: true });
+                throw new Error('Không tìm thấy ô nhập OTP (đã chụp debug-step7)');
+            }
+        } else {
+            log('⌨️  Điền OTP...');
+            for (let i = 0; i < 6; i++) {
+                await otpInputs[i].type(signupOTP[i], { delay: 80 });
+                await sleep(180);
+            }
         }
         // Auto-submit khi đủ 6 số; chờ component kịp gửi request
         await sleep(1200);
@@ -895,8 +704,24 @@ export async function runBot(config, socket, onDone) {
         }
         if (loginVisible) {
             log('🔐 Session đã bị logout sau đổi password');
-            const reloginAuth = await loginWithPassword(page, mail.address, newPassword, log);
-            if (reloginAuth?.token) sessionAuth = reloginAuth;
+            log('⏭️  Bỏ qua bước relogin (theo yêu cầu test) — lưu account sau đổi password');
+            const result = {
+                email: mail.address,
+                password: newPassword,
+                token: inboxToken,
+                tokenExpiresAt: inboxExpiresAt,
+                mailPassword: mail.password,
+                provider: mail.provider,
+                timestamp: new Date().toISOString(),
+            };
+            log('');
+            log('════════════════════════════════════════════');
+            log('✅ HOÀN TẤT (đã đổi pass, skip relogin)');
+            log(`📧 Provider: ${result.provider}`);
+            log(`📋 Format: ${result.email}|${result.password}|${result.token}`);
+            log('════════════════════════════════════════════');
+            socket.emit('result', result);
+            return;
         } else {
             log('⚠️ Không thấy login dialog sau đổi password');
         }
