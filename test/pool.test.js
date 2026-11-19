@@ -30,8 +30,8 @@ test('bảng vmos có token_expires_at và cleanup dùng TTL 12 ngày', async ()
   assert.deepEqual(cleanup.params, [1036800]);
 });
 
-test('producer không lưu khi pool đã đạt 300', async () => {
-  const pool = makePool({ count: 300 });
+test('producer không lưu khi pool đã đạt 500', async () => {
+  const pool = makePool({ count: 500 });
   const db = new VmosPoolDB({ pool, log: () => {} });
   await db.connect();
   assert.equal(await db.canAccept(), false);

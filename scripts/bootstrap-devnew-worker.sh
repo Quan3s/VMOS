@@ -4,7 +4,7 @@ set -euo pipefail
 # Bootstrap + run một VMOS producer worker trên host Ubuntu (ephemeral, ~60 phút).
 # Yêu cầu env: DATABASE_URL (Postgres pool dùng chung, bảng vmos).
 # Tuỳ chọn: VMOS_REPO (mặc định Quan3s/VMOS), VMOS_REF (branch/tag/commit),
-#           WORKDIR (mặc định /app/vmos-worker), VMOS_MAX_ACCOUNTS (300),
+#           WORKDIR (mặc định /app/vmos-worker), VMOS_MAX_ACCOUNTS (500),
 #           VMOS_DB_TABLE (vmos), INSTALL_CHROME=1.
 #
 # Ví dụ:
@@ -18,7 +18,7 @@ VMOS_REPO="${VMOS_REPO:-https://github.com/Quan3s/VMOS.git}"
 VMOS_REF="${VMOS_REF:-main}"
 WORKDIR="${WORKDIR:-/app/vmos-worker}"
 VMOS_DB_TABLE="${VMOS_DB_TABLE:-vmos}"
-VMOS_MAX_ACCOUNTS="${VMOS_MAX_ACCOUNTS:-300}"
+VMOS_MAX_ACCOUNTS="${VMOS_MAX_ACCOUNTS:-500}"
 INSTALL_CHROME="${INSTALL_CHROME:-1}"
 
 export DEBIAN_FRONTEND=noninteractive

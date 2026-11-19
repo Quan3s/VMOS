@@ -18,7 +18,7 @@ const apiKeys = new Set(
 const db = new VmosPoolDB({
   connectionString: process.env.DATABASE_URL || '',
   table: process.env.VMOS_DB_TABLE || 'vmos',
-  maxAccounts: Number(process.env.VMOS_MAX_ACCOUNTS || 300),
+  maxAccounts: Number(process.env.VMOS_MAX_ACCOUNTS || 500),
   ttlSeconds: Number(process.env.VMOS_TTL_SECONDS || 12 * 24 * 3600),
 });
 

@@ -45,7 +45,7 @@ export async function runProducer({
   db = new VmosPoolDB({
     connectionString: process.env.DATABASE_URL || cfg.database?.connectionString || '',
     table: process.env.VMOS_DB_TABLE || cfg.database?.table || 'vmos',
-    maxAccounts: Number(process.env.VMOS_MAX_ACCOUNTS || cfg.database?.maxAccounts || 300),
+    maxAccounts: Number(process.env.VMOS_MAX_ACCOUNTS || cfg.database?.maxAccounts || 500),
   }),
   emit = null,
   respawn = respawnProducer,
